@@ -1,133 +1,55 @@
-#!/usr/bin/env ruby
-# coding: utf-8
+#!/usr/bin/ruby
 
-# A script to fetch calendar events from Google via Google Calendar API
+# Google Calendar API: https://developers.google.com/google-apps/calendar/quickstart/ruby
+#                      https://developers.google.com/google-apps/calendar/v3/reference/
+#                      https://console.developers.google.com
+
+#require 'google/api_client'
+require 'google/api_client/client_secrets'
+require 'google/api_client/auth/installed_app'
+require 'google/api_client/auth/storage'
+require 'google/api_client/auth/storages/file_store'
+require 'google/apis/calendar_v3'
+require 'fileutils'
+require 'logger'
+require "net/http"
+require "uri"
+require 'base64'
+
+LOGFILE = "/home/jeff/.gcal2org.log"
+
+APPLICATION_NAME = 'gcal2org'
+CLIENT_SECRETS_PATH = 'client_secret.json'
+CREDENTIALS_PATH = File.join(Dir.home, '.credentials', "gcal2org.json")
+SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
+
+##
+# Ensure valid credentials, either by restoring from the saved credentials
+# files or intitiating an OAuth2 authorization request via InstalledAppFlow.
+# If authorization is required, the user's default browser will be launched
+# to approve the request.
 #
-# reference:
-# https://developers.google.com/google-apps/calendar/setup
-# https://developers.google.com/google-apps/calendar/instantiate
-# https://developers.google.com/google-apps/calendar/v3/reference/events/list#examples
-# https://developers.google.com/google-apps/calendar/v3/reference/
+# @return [Signet::OAuth2::Client] OAuth2 credentials
+def authorize
+  FileUtils.mkdir_p(File.dirname(CREDENTIALS_PATH))
 
-require 'google/api_client' # see http://code.google.com/p/google-api-ruby-client/
-require 'yaml'
+  file_store = Google::APIClient::FileStore.new(CREDENTIALS_PATH)
+  storage = Google::APIClient::Storage.new(file_store)
+  auth = storage.authorize
 
-module OAuth
-  class Google
-    @@config_file=ENV['HOME'] + '/.google-api.yaml'
-    class << self
-      def load
-        if File.exist?(@@config_file)
-          return YAML.load_file(@@config_file)
-        else
-          warn "#@@config_file not found"
-          self.abort_config_needed
-        end
-      end
-
-      def abort_config_needed
-        abort <<INTRO_TO_AUTH
-    This utility requires valid oauth credentials and token for your project in the
-    config file '#@@config_file'.
-
-    You can create it by jumping through some oauth hoops by setting up a project and then
-    using the google-api command, provided by the google-api-client gem:
-
-    - Go to Google API Console at https://code.google.com/apis/console/ and set up a project
-      that you will use to access this data.
-     - In the "API Access" section, in the list of "Redirect URIs" include
-       'http://localhost:12736/'.
-     - Get your project's CLIENT_ID and CLIENT_SECRET to use below.
-
-    - Users (including you) will need to grant permissions to access their calendars.
-     - Generate the config file '#@@config_file' by calling the following, which will launch
-       the browser and write the config file:
-    (LD_LIBRARY_PATH=
-     CLIENT_ID=[YOUR-CLIENT_ID]
-     CLIENT_SECRET=[YOUR-CLIENT-SECRET]
-     google-api oauth-2-login --scope=https://www.googleapis.com/auth/calendar --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" )
-INTRO_TO_AUTH
-      end
-    end
+  if auth.nil? || (auth.expired? && auth.refresh_token.nil?)
+    app_info = Google::APIClient::ClientSecrets.load(CLIENT_SECRETS_PATH)
+    flow = Google::APIClient::InstalledAppFlow.new({
+      :port => 4567,
+      :client_id => app_info.client_id,
+      :client_secret => app_info.client_secret,
+      :scope => SCOPE})
+    auth = flow.authorize(storage)
+    $logger.info "credentials saved to #{CREDENTIALS_PATH}" unless auth.nil?
   end
+  auth
 end
 
-module Calendar
-  class Time < ::Time
-    def start_of_day
-      Time.local(year, month, day)
-    end
-  end
-end
-
-module Calendar
-  class GoogleAPIClient < ::Google::APIClient
-    attr_reader :client
-    def initialize(oauth)
-      super
-      authorization.client_id     = oauth["client_id"]
-      authorization.client_secret = oauth["client_secret"]
-      authorization.scope         = oauth["scope"]
-      authorization.refresh_token = oauth["refresh_token"]
-      authorization.access_token  = oauth["access_token"]
-
-      # NB: seems authorization.expired? does not work b/c times are not stored
-      # in the yaml -- so we just call authorization.fetch_access_token! on error
-      # see update_token! in http://code.google.com/p/google-api-ruby-client/wiki/OAuth2
-      #if authorization.refresh_token && authorization.expired?
-      #  authorization.fetch_access_token!
-      #end
-    end
-
-    def fetch_data_with_retry(api_method, params)
-      data = execute_aux(api_method, params).data
-      if data_error(data) # try refereshing the access token and updating the data
-        authorization.fetch_access_token!
-        data = execute_aux(api_method, params).data
-      end
-      if err = data_error(data) # raise exception if still an error
-        raise RuntimeError, err.to_json
-      end
-      return data
-    end
-
-    private
-    def execute_aux(api_method, params)
-      execute(:api_method => api_method, :parameters => params)
-    end
-
-    def data_error(data)
-      data.to_hash["error"]
-    end
-  end
-end
-
-module Calendar
-  class GoogleCalendarClient < GoogleAPIClient
-    def events(query)
-      Enumerator.new {|y| events_aux(query){|event| y << event}}
-    end
-
-    private
-    def events_aux(cal_query, &block) # requires a block
-      data = list_events(cal_query)
-      data.items.each(&block)
-      if page_token = data.next_page_token
-        events_aux(cal_query.merge(:pageToken => page_token), &block)
-      end
-    end
-
-    # Params are as described in:
-    # https://developers.google.com/google-apps/calendar/v3/reference/events/list
-    def list_events(params)
-      fetch_data_with_retry(calendar_service.events.list, params)
-    end
-
-    def calendar_service
-      discovered_api('calendar', 'v3')
-    end
-  end
-end
 
 def gcal_range_to_org_range(ev)
   date_only_s = false
@@ -155,17 +77,87 @@ def gcal_range_to_org_range(ev)
   end
 end
 
-cal = Calendar::GoogleCalendarClient.new(OAuth::Google.load)
+
+def redirect_output
+  unless LOGFILE == 'STDOUT'
+    logfile = File.expand_path(LOGFILE)
+    FileUtils.mkdir_p(File.dirname(logfile), :mode => 0755)
+    FileUtils.touch logfile
+    File.chmod 0644, logfile
+    $stdout.reopen logfile, 'a'
+  end
+  $stderr.reopen $stdout
+  $stdout.sync = $stderr.sync = true
+end
+
+
+# setup logger
+#redirect_output unless $DEBUG
+
+$logger = Logger.new STDOUT
+$logger.level = $DEBUG ? Logger::DEBUG : Logger::INFO
+$logger.info 'starting'
+
+# Initialize the API
+Client = Google::Apis::CalendarV3::CalendarService.new
+#Client = Google::APIClient.new(:application_name => APPLICATION_NAME)
+Client.authorization = authorize
+service = Client #Client.discovered_api('calendar', 'v3')
+
+module Calendar
+  class Time < ::Time
+    def start_of_day
+      Time.local(year, month, day)
+    end
+  end
+end
+
+page_token = nil
+result = service.list_events(calendar_id: 'primary')
+# ,
+#                              time_min: Calendar::Time.new.start_of_day.iso8601,
+#                              #single_events: "true",
+#                              order_by: "startTime",
+#                              max_results: 30,
+#                              sort_order: 'a')
+while true
+  events = result.data.items
+  events.each do |e|
+    puts e.summary
+  end
+  break
+  if !(page_token = result.data.next_page_token)
+    break
+  end
+  result = Client.execute(:api_method => service.events.list,
+                          :parameters => {:calendarId   => 'primary',
+                                          :timeMin      => Calendar::Time.new.start_of_day.iso8601,
+                                          :singleEvents => "true",
+                                          :orderBy      => "startTime",
+                                          :maxResults   => 30,
+                                          :sortOrder    => 'a',
+                                          :pageToken    => page_token})
+end
+
+exit
 query = {:calendarId   => 'primary',
          :timeMin      => Calendar::Time.new.start_of_day.iso8601,
          :singleEvents => "true",
          :orderBy      => "startTime",
          :maxResults   => 30,
          :sortOrder    => 'a'}
-events = cal.events(query)
+events = Client.execute!(
+  :api_method => service.events.list,
+  :parameters => query)
+
+puts events
+
+exit
+#results.data.messages.each { |message|
 #events.each{|ev| puts ev.to_json }
 
-fname = "/home/jeff/Dropbox/workspace/org/gcal.org"
+#fname = "/home/jeff/Dropbox/workspace/org/gcal.org"
+fname = "/tmp/gcal.org"
 org = File.open(fname, "w")
 
 def format_email person
@@ -195,3 +187,5 @@ events.first(100).each { |ev|
 }
 
 org.close
+
+$logger.info 'done'
