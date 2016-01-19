@@ -1,3 +1,7 @@
+gcal2org - Google Calendar to Orgmode
+
+Reads next 30 appointments from primary google calendar and writes to an orgmode file.
+
 From [[https://developers.google.com/gmail/api/quickstart/ruby][Ruby Quickstart | Gmail API | Google Developers]]
 
 * Step 1: Enable the Gmail API
