@@ -10,6 +10,7 @@ require 'googleauth/stores/file_token_store'
 require 'google/apis/calendar_v3'
 require 'fileutils'
 require 'logger'
+require 'thor'
 
 ORGFILE = File.join(Dir.home, 'Dropbox/workspace/org', 'gcal.org')
 LOGFILE = File.join(Dir.home, '.gcal2org.log')
@@ -26,22 +27,16 @@ SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
 # the user's default browser will be launched to approve the request.
 #
 # @return [Google::Auth::UserRefreshCredentials] OAuth2 credentials
-def authorize
+def authorize interactive
   FileUtils.mkdir_p(File.dirname(CREDENTIALS_PATH))
-
   client_id = Google::Auth::ClientId.from_file(CLIENT_SECRETS_PATH)
   token_store = Google::Auth::Stores::FileTokenStore.new(file: CREDENTIALS_PATH)
-  authorizer = Google::Auth::UserAuthorizer.new(
-    client_id, SCOPE, token_store)
+  authorizer = Google::Auth::UserAuthorizer.new(client_id, SCOPE, token_store)
   user_id = 'default'
   credentials = authorizer.get_credentials(user_id)
-  if credentials.nil?
-    url = authorizer.get_authorization_url(
-      base_url: OOB_URI)
-    puts "Open the following URL in the browser and enter the " +
-         "resulting code after authorization"
-    puts url
-    code = gets
+  if credentials.nil? and interactive
+    url = authorizer.get_authorization_url(base_url: OOB_URI)
+    code = ask("Open the following URL in the browser and enter the resulting code after authorization\n" + url)
     credentials = authorizer.get_and_store_credentials_from_code(
       user_id: user_id, code: code, base_url: OOB_URI)
   end
@@ -81,38 +76,6 @@ def format_email person
 end
 
 
-def redirect_output
-  unless LOGFILE == 'STDOUT'
-    logfile = File.expand_path(LOGFILE)
-    FileUtils.mkdir_p(File.dirname(logfile), :mode => 0755)
-    FileUtils.touch logfile
-    File.chmod 0644, logfile
-    $stdout.reopen logfile, 'a'
-  end
-  $stderr.reopen $stdout
-  $stdout.sync = $stderr.sync = true
-end
-
-
-# setup logger
-$logger = Logger.new STDOUT
-$logger.level = $DEBUG ? Logger::DEBUG : Logger::INFO
-$logger.info 'starting'
-
-pre_authorization = authorize
-
-redirect_output unless $DEBUG
-
-
-#
-# initialize the API
-#
-service = Google::Apis::CalendarV3::CalendarService.new
-service.client_options.application_name = APPLICATION_NAME
-service.authorization = pre_authorization
-calendar = service
-
-
 module Calendar
   class Time < ::Time
     def start_of_day
@@ -122,49 +85,94 @@ module Calendar
 end
 
 
-File.open(ORGFILE, "w") do |org|
-
-  limit = 30
-  page_token = nil
-  begin
-    result = calendar.list_events('primary',
-                                  max_results: [100, limit].min,
-                                  single_events: true,
-                                  order_by: 'startTime',
-                                  time_min: Calendar::Time.new.start_of_day.iso8601,
-                                  page_token: page_token,
-                                  fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
-
-    result.items.each do |event|
-      org.puts '* ' + event.summary
-      org.puts gcal_range_to_org_range(event)
-      org.puts ':PROPERTIES:'
-      org.puts ':LOCATION: ' + event.location if event.location
-      org.puts ':ORGANIZER: ' + "#{format_email(event.organizer)}" if event.organizer
-      event.attendees.each do |attendee|
-        org.puts ':ATTENDEE: ' + "#{format_email(attendee)}"
-      end if event.attendees
-      org.puts ':END:'
-      description = event.description
-      if description
-        description = description
-                      .gsub(/^\*/, '-*')
-                      .gsub(/_/,   ' ')
-                      .gsub(/\r$/, '')
-                      .gsub(/ +$/, '')
-                      .gsub(/^\n/, '')
-        org.puts description
+class GCal2Org < Thor
+  no_commands {
+    def redirect_output
+      unless LOGFILE == 'STDOUT'
+        logfile = File.expand_path(LOGFILE)
+        FileUtils.mkdir_p(File.dirname(logfile), :mode => 0755)
+        FileUtils.touch logfile
+        File.chmod 0644, logfile
+        $stdout.reopen logfile, 'a'
       end
+      $stderr.reopen $stdout
+      $stdout.sync = $stderr.sync = true
     end
 
-    limit -= result.items.length
-    if result.next_page_token
-      page_token = result.next_page_token
-    else
+    def setup_logger
+      redirect_output if options[:log]
+
+      $logger = Logger.new STDOUT
+      $logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
+      $logger.info 'starting'
+    end
+  }
+
+  class_option :log,     :type => :boolean, :default => true, :desc => "log output to ~/.gcal2org.log"
+  class_option :verbose, :type => :boolean, :aliases => "-v", :desc => "increase verbosity"
+
+  desc "auth", "Authorize the application with google services"
+  def auth
+    setup_logger
+    #
+    # initialize the API
+    #
+    service = Google::Apis::CalendarV3::CalendarService.new
+    service.client_options.application_name = APPLICATION_NAME
+    service.authorization = authorize !options[:log]
+    service
+  end
+
+  desc "scan", "Scan calendar"
+  def scan
+    calendar = auth
+    File.open(ORGFILE, "w") do |org|
+
+      limit = 30
       page_token = nil
-    end
-  end while !page_token.nil? && limit > 0
+      begin
+        result = calendar.list_events('primary',
+                                      max_results: [100, limit].min,
+                                      single_events: true,
+                                      order_by: 'startTime',
+                                      time_min: Calendar::Time.new.start_of_day.iso8601,
+                                      page_token: page_token,
+                                      fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
 
+        result.items.each do |event|
+          org.puts '* ' + event.summary
+          org.puts gcal_range_to_org_range(event)
+          org.puts ':PROPERTIES:'
+          org.puts ':LOCATION: ' + event.location if event.location
+          org.puts ':ORGANIZER: ' + "#{format_email(event.organizer)}" if event.organizer
+          event.attendees.each do |attendee|
+            org.puts ':ATTENDEE: ' + "#{format_email(attendee)}"
+          end if event.attendees
+          org.puts ':END:'
+          description = event.description
+          if description
+            description = description
+                          .gsub(/^\*/, '-*')
+                          .gsub(/_/,   ' ')
+                          .gsub(/\r$/, '')
+                          .gsub(/ +$/, '')
+                          .gsub(/^\n/, '')
+            org.puts description
+          end
+        end
+
+        limit -= result.items.length
+        if result.next_page_token
+          page_token = result.next_page_token
+        else
+          page_token = nil
+        end
+      end while !page_token.nil? && limit > 0
+
+    end
+
+    $logger.info 'done'
+  end
 end
 
-$logger.info 'done'
+GCal2Org.start
