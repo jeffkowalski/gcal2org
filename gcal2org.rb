@@ -5,46 +5,47 @@
 #                      https://console.developers.google.com
 # Google API Ruby Client:  https://github.com/google/google-api-ruby-client
 
-require 'google/api_client'
-require 'google/api_client/client_secrets'
-require 'google/api_client/auth/installed_app'
-require 'google/api_client/auth/storage'
-require 'google/api_client/auth/storages/file_store'
+require 'googleauth'
+require 'googleauth/stores/file_token_store'
 require 'google/apis/calendar_v3'
+require 'fileutils'
 require 'logger'
 
 ORGFILE = File.join(Dir.home, 'Dropbox/workspace/org', 'gcal.org')
 LOGFILE = File.join(Dir.home, '.gcal2org.log')
 
+OOB_URI = 'urn:ietf:wg:oauth:2.0:oob'
+APPLICATION_NAME = 'gcal2org'
 CLIENT_SECRETS_PATH = 'client_secret.json'
-CREDENTIALS_PATH = File.join(Dir.home, '.credentials', "gcal2org.json")
+CREDENTIALS_PATH = File.join(Dir.home, '.credentials', "gcal2org.yaml")
 SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
 
 ##
 # Ensure valid credentials, either by restoring from the saved credentials
-# files or intitiating an OAuth2 authorization request via InstalledAppFlow.
-# If authorization is required, the user's default browser will be launched
-# to approve the request.
+# files or intitiating an OAuth2 authorization. If authorization is required,
+# the user's default browser will be launched to approve the request.
 #
-# @return [Signet::OAuth2::Client] OAuth2 credentials
+# @return [Google::Auth::UserRefreshCredentials] OAuth2 credentials
 def authorize
   FileUtils.mkdir_p(File.dirname(CREDENTIALS_PATH))
 
-  file_store = Google::APIClient::FileStore.new(CREDENTIALS_PATH)
-  storage = Google::APIClient::Storage.new(file_store)
-  auth = storage.authorize
-
-  if auth.nil? || (auth.expired? && auth.refresh_token.nil?)
-    app_info = Google::APIClient::ClientSecrets.load(CLIENT_SECRETS_PATH)
-    flow = Google::APIClient::InstalledAppFlow.new({
-                                                     :port => 4567,
-                                                     :client_id => app_info.client_id,
-                                                     :client_secret => app_info.client_secret,
-                                                     :scope => SCOPE})
-    auth = flow.authorize(storage)
-    $logger.info "credentials saved to #{CREDENTIALS_PATH}" unless auth.nil?
+  client_id = Google::Auth::ClientId.from_file(CLIENT_SECRETS_PATH)
+  token_store = Google::Auth::Stores::FileTokenStore.new(file: CREDENTIALS_PATH)
+  authorizer = Google::Auth::UserAuthorizer.new(
+    client_id, SCOPE, token_store)
+  user_id = 'default'
+  credentials = authorizer.get_credentials(user_id)
+  if credentials.nil?
+    url = authorizer.get_authorization_url(
+      base_url: OOB_URI)
+    puts "Open the following URL in the browser and enter the " +
+         "resulting code after authorization"
+    puts url
+    code = gets
+    credentials = authorizer.get_and_store_credentials_from_code(
+      user_id: user_id, code: code, base_url: OOB_URI)
   end
-  auth
+  credentials
 end
 
 
@@ -94,17 +95,23 @@ end
 
 
 # setup logger
-redirect_output unless $DEBUG
-
 $logger = Logger.new STDOUT
 $logger.level = $DEBUG ? Logger::DEBUG : Logger::INFO
 $logger.info 'starting'
 
-# Initialize the API
-Calendar = Google::Apis::CalendarV3
-Client = Calendar::CalendarService.new
-Client.authorization = authorize
-calendar = Client
+pre_authorization = authorize
+
+redirect_output unless $DEBUG
+
+
+#
+# initialize the API
+#
+service = Google::Apis::CalendarV3::CalendarService.new
+service.client_options.application_name = APPLICATION_NAME
+service.authorization = pre_authorization
+calendar = service
+
 
 module Calendar
   class Time < ::Time
