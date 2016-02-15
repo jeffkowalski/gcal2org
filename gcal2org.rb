@@ -1,4 +1,4 @@
-#!/usr/bin/ruby2.0
+#!/usr/bin/env ruby
 
 # Google Calendar API: https://developers.google.com/google-apps/calendar/quickstart/ruby
 #                      https://developers.google.com/google-apps/calendar/v3/reference/
