@@ -117,58 +117,68 @@ class GCal2Org < Thor
     #
     # initialize the API
     #
-    service = Google::Apis::CalendarV3::CalendarService.new
-    service.client_options.application_name = APPLICATION_NAME
-    service.authorization = authorize !options[:log]
-    service
+    begin
+      service = Google::Apis::CalendarV3::CalendarService.new
+      service.client_options.application_name = APPLICATION_NAME
+      service.authorization = authorize !options[:log]
+      service
+    rescue Exception => e
+      $logger.error e.message
+      $logger.error e.backtrace.inspect
+    end
   end
 
   desc "scan", "Scan calendar"
   def scan
     calendar = auth
-    File.open(ORGFILE, "w") do |org|
+    begin
+      File.open(ORGFILE, "w") do |org|
 
-      limit = 30
-      page_token = nil
-      begin
-        result = calendar.list_events('primary',
-                                      max_results: [100, limit].min,
-                                      single_events: true,
-                                      order_by: 'startTime',
-                                      time_min: Calendar::Time.new.start_of_day.iso8601,
-                                      page_token: page_token,
-                                      fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
+        limit = 30
+        page_token = nil
+        begin
+          result = calendar.list_events('primary',
+                                        max_results: [100, limit].min,
+                                        single_events: true,
+                                        order_by: 'startTime',
+                                        time_min: Calendar::Time.new.start_of_day.iso8601,
+                                        page_token: page_token,
+                                        fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
 
-        result.items.each do |event|
-          org.puts '* ' + event.summary
-          org.puts gcal_range_to_org_range(event)
-          org.puts ':PROPERTIES:'
-          org.puts ':LOCATION: ' + event.location if event.location
-          org.puts ':ORGANIZER: ' + "#{format_email(event.organizer)}" if event.organizer
-          event.attendees.each do |attendee|
-            org.puts ':ATTENDEE: ' + "#{format_email(attendee)}"
-          end if event.attendees
-          org.puts ':END:'
-          description = event.description
-          if description
-            description = description
-                          .gsub(/^\*/, '-*')
-                          .gsub(/_/,   ' ')
-                          .gsub(/\r$/, '')
-                          .gsub(/ +$/, '')
-                          .gsub(/^\n/, '')
-            org.puts description
+          result.items.each do |event|
+            org.puts '* ' + event.summary
+            org.puts gcal_range_to_org_range(event)
+            org.puts ':PROPERTIES:'
+            org.puts ':LOCATION: ' + event.location if event.location
+            org.puts ':ORGANIZER: ' + "#{format_email(event.organizer)}" if event.organizer
+            event.attendees.each do |attendee|
+              org.puts ':ATTENDEE: ' + "#{format_email(attendee)}"
+            end if event.attendees
+            org.puts ':END:'
+            description = event.description
+            if description
+              description = description
+                            .gsub(/^\*/, '-*')
+                            .gsub(/_/,   ' ')
+                            .gsub(/\r$/, '')
+                            .gsub(/ +$/, '')
+                            .gsub(/^\n/, '')
+              org.puts description
+            end
           end
-        end
 
-        limit -= result.items.length
-        if result.next_page_token
-          page_token = result.next_page_token
-        else
-          page_token = nil
-        end
-      end while !page_token.nil? && limit > 0
+          limit -= result.items.length
+          if result.next_page_token
+            page_token = result.next_page_token
+          else
+            page_token = nil
+          end
+        end while !page_token.nil? && limit > 0
 
+      end
+    rescue Exception => e
+      $logger.error e.message
+      $logger.error e.backtrace.inspect
     end
 
     $logger.info 'done'
