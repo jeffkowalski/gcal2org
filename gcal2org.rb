@@ -13,7 +13,7 @@ require 'logger'
 require 'thor'
 require 'resolv-replace'
 
-ORGFILE = File.join(Dir.home, 'Dropbox/workspace/org', 'gcal.org')
+ORGPATH = File.join(Dir.home, 'Dropbox/workspace/org')
 LOGFILE = File.join(Dir.home, '.gcal2org.log')
 
 OOB_URI = 'urn:ietf:wg:oauth:2.0:oob'
@@ -132,13 +132,15 @@ class GCal2Org < Thor
   desc "scan", "Scan calendar"
   def scan
     calendar = auth
-    begin
-      File.open(ORGFILE, "w") do |org|
+    [{:file => 'jeff',     :calendar => 'primary'},
+     {:file => 'michelle', :calendar => 'bowen.kowalski@gmail.com'}].each do |source|
+      $logger.info "Fetching calendar #{source[:calendar]} into #{source[:file]}"
+      File.open(File.join(ORGPATH, "#{source[:file]}.org"), "w") do |org|
 
         limit = 30
         page_token = nil
         begin
-          result = calendar.list_events('primary',
+          result = calendar.list_events(source[:calendar],
                                         max_results: [100, limit].min,
                                         single_events: true,
                                         order_by: 'startTime',
