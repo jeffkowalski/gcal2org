@@ -14,7 +14,7 @@ require 'thor'
 require 'resolv-replace'
 
 ORGPATH = File.join(Dir.home, 'Dropbox/workspace/org')
-LOGFILE = File.join(Dir.home, '.log', '.gcal2org.log')
+LOGFILE = File.join(Dir.home, '.log', 'gcal2org.log')
 
 OOB_URI = 'urn:ietf:wg:oauth:2.0:oob'
 APPLICATION_NAME = 'gcal2org'
