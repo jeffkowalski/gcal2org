@@ -132,10 +132,10 @@ class GCal2Org < Thor
   desc "scan", "Scan calendar"
   def scan
     calendar = auth
-    [{:file => 'jeff',     :calendar => 'primary'},
-     {:file => 'michelle', :calendar => 'bowen.kowalski@gmail.com'}].each do |source|
+    [{:file => 'jeff.org',     :calendar => 'primary'},
+     {:file => 'michelle.org', :calendar => 'bowen.kowalski@gmail.com'}].each do |source|
       $logger.info "Fetching calendar #{source[:calendar]} into #{source[:file]}"
-      File.open(File.join(ORGPATH, "#{source[:file]}.org"), "w") do |org|
+      File.open(File.join(ORGPATH, "#{source[:file]}"), "w") do |org|
 
         limit = 30
         page_token = nil
@@ -149,7 +149,7 @@ class GCal2Org < Thor
                                         fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
 
           result.items.each do |event|
-            org.puts '* ' + event.summary
+            org.puts '* ' + (event.summary.nil? ? '(No title)' : event.summary)
             org.puts gcal_range_to_org_range(event)
             org.puts ':PROPERTIES:'
             org.puts ':LOCATION: ' + event.location if event.location
