@@ -21,7 +21,7 @@ Usage:
   gcal2org.rb scan
 
 Options:
-      [--log], [--no-log]          # log output to ~/.gcal2org.log
+      [--log], [--no-log]          # log output to ~/.log/.gcal2org.log
                                    # Default: true
   -v, [--verbose], [--no-verbose]  # increase verbosity
 
