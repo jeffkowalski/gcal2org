@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
 
 # Google Calendar API: https://developers.google.com/google-apps/calendar/quickstart/ruby
 #                      https://developers.google.com/google-apps/calendar/v3/reference/
@@ -19,7 +20,7 @@ LOGFILE = File.join(Dir.home, '.log', 'gcal2org.log')
 OOB_URI = 'urn:ietf:wg:oauth:2.0:oob'
 APPLICATION_NAME = 'gcal2org'
 CLIENT_SECRETS_PATH = 'client_secret.json'
-CREDENTIALS_PATH = File.join(Dir.home, '.credentials', "gcal2org.yaml")
+CREDENTIALS_PATH = File.join(Dir.home, '.credentials', 'gcal2org.yaml')
 SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
 
 ##
@@ -28,52 +29,51 @@ SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
 # the user's default browser will be launched to approve the request.
 #
 # @return [Google::Auth::UserRefreshCredentials] OAuth2 credentials
-def authorize interactive
+def authorize(interactive)
   FileUtils.mkdir_p(File.dirname(CREDENTIALS_PATH))
   client_id = Google::Auth::ClientId.from_file(CLIENT_SECRETS_PATH)
   token_store = Google::Auth::Stores::FileTokenStore.new(file: CREDENTIALS_PATH)
   authorizer = Google::Auth::UserAuthorizer.new(client_id, SCOPE, token_store)
   user_id = 'default'
   credentials = authorizer.get_credentials(user_id)
-  if credentials.nil? and interactive
+  if credentials.nil? && interactive
     url = authorizer.get_authorization_url(base_url: OOB_URI)
     code = ask("Open the following URL in the browser and enter the resulting code after authorization\n" + url)
     credentials = authorizer.get_and_store_credentials_from_code(
-      user_id: user_id, code: code, base_url: OOB_URI)
+      user_id: user_id, code: code, base_url: OOB_URI
+    )
   end
   credentials
 end
 
-
-def gcal_range_to_org_range(ev)
+def gcal_range_to_org_range(event)
   date_only_s = false
-  startTime = ev.start.date_time
-  unless startTime
+  start_time = event.start.date_time
+  unless start_time
     date_only_s = true
-    startTime = Time.parse(ev.start.date)
+    start_time = Time.parse(event.start.date)
   end
 
   date_only_e = false
-  endTime = ev.end.date_time
-  unless endTime
+  end_time = event.end.date_time
+  unless end_time
     date_only_e = true
-    endTime = Time.parse(ev.end.date)
+    end_time = Time.parse(event.end.date)
   end
 
   if date_only_s && date_only_e
-    if endTime.eql?(startTime + 86400)
-      return startTime.strftime("<%Y-%m-%d %a>")
+    if end_time.eql?(start_time + 86_400)
+      start_time.strftime('<%Y-%m-%d %a>')
     else
-      return startTime.strftime("<%Y-%m-%d %a>") + '--' + (endTime-84000).strftime("<%Y-%m-%d %a>")
+      start_time.strftime('<%Y-%m-%d %a>') + '--' + (end_time - 84_000).strftime('<%Y-%m-%d %a>')
     end
   else
-    return startTime.strftime("<%Y-%m-%d %a %H:%M>") + '--' + endTime.strftime("<%Y-%m-%d %a %H:%M>")
+    start_time.strftime('<%Y-%m-%d %a %H:%M>') + '--' + end_time.strftime('<%Y-%m-%d %a %H:%M>')
   end
 end
 
-
-def format_email person
-  return [("\"#{person.display_name}\" " if person.display_name), "<#{person.email}>"].join('')
+def format_email(person)
+  [("\"#{person.display_name}\" " if person.display_name), "<#{person.email}>"].join('')
 end
 
 
@@ -87,13 +87,13 @@ end
 
 
 class GCal2Org < Thor
-  no_commands {
+  no_commands do
     def redirect_output
       unless LOGFILE == 'STDOUT'
         logfile = File.expand_path(LOGFILE)
-        FileUtils.mkdir_p(File.dirname(logfile), :mode => 0755)
+        FileUtils.mkdir_p(File.dirname(logfile), mode: 0o755)
         FileUtils.touch logfile
-        File.chmod 0644, logfile
+        File.chmod 0o644, logfile
         $stdout.reopen logfile, 'a'
       end
       $stderr.reopen $stdout
@@ -103,16 +103,16 @@ class GCal2Org < Thor
     def setup_logger
       redirect_output if options[:log]
 
-      $logger = Logger.new STDOUT
-      $logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
-      $logger.info 'starting'
+      @logger = Logger.new STDOUT
+      @logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
+      @logger.info 'starting'
     end
-  }
+  end
 
-  class_option :log,     :type => :boolean, :default => true, :desc => "log output to #{LOGFILE}"
-  class_option :verbose, :type => :boolean, :aliases => "-v", :desc => "increase verbosity"
+  class_option :log,     type: :boolean, default: true, desc: "log output to #{LOGFILE}"
+  class_option :verbose, type: :boolean, aliases: '-v', desc: 'increase verbosity'
 
-  desc "auth", "Authorize the application with google services"
+  desc 'auth', 'Authorize the application with google services'
   def auth
     setup_logger
     #
@@ -124,22 +124,21 @@ class GCal2Org < Thor
       service.authorization = authorize !options[:log]
       service
     rescue Exception => e
-      $logger.error e.message
-      $logger.error e.backtrace.inspect
+      @logger.error e.message
+      @logger.error e.backtrace.inspect
     end
   end
 
-  desc "scan", "Scan calendar"
+  desc 'scan', 'Scan calendar'
   def scan
     calendar = auth
-    [{:file => 'jeff.org',     :calendar => 'primary'},
-     {:file => 'michelle.org', :calendar => 'bowen.kowalski@gmail.com'}].each do |source|
-      $logger.info "Fetching calendar #{source[:calendar]} into #{source[:file]}"
-      File.open(File.join(ORGPATH, "#{source[:file]}"), "w") do |org|
-
+    [{ file: 'jeff.org',     calendar: 'primary' },
+     { file: 'michelle.org', calendar: 'bowen.kowalski@gmail.com' }].each do |source|
+      @logger.info "Fetching calendar #{source[:calendar]} into #{source[:file]}"
+      File.open(File.join(ORGPATH, source[:file]), 'w') do |org|
         limit = 30
         page_token = nil
-        begin
+        loop do
           result = calendar.list_events(source[:calendar],
                                         max_results: [100, limit].min,
                                         single_events: true,
@@ -153,38 +152,34 @@ class GCal2Org < Thor
             org.puts gcal_range_to_org_range(event)
             org.puts ':PROPERTIES:'
             org.puts ':LOCATION: ' + event.location if event.location
-            org.puts ':ORGANIZER: ' + "#{format_email(event.organizer)}" if event.organizer
-            event.attendees.each do |attendee|
-              org.puts ':ATTENDEE: ' + "#{format_email(attendee)}"
-            end if event.attendees
+            org.puts ':ORGANIZER: ' + format_email(event.organizer) if event.organizer
+            event.attendees&.each do |attendee|
+              org.puts ':ATTENDEE: ' + format_email(attendee)
+            end
             org.puts ':END:'
             description = event.description
-            if description
-              description = description
-                            .gsub(/^\*/, '-*')
-                            .gsub(/_/,   ' ')
-                            .gsub(/\r$/, '')
-                            .gsub(/ +$/, '')
-                            .gsub(/^\n/, '')
-              org.puts description
-            end
+            next unless description
+
+            description = description
+                          .gsub(/^\*/, '-*')
+                          .gsub(/_/,   ' ')
+                          .gsub(/\r$/, '')
+                          .gsub(/ +$/, '')
+                          .gsub(/^\n/, '')
+            org.puts description
           end
 
           limit -= result.items.length
-          if result.next_page_token
-            page_token = result.next_page_token
-          else
-            page_token = nil
-          end
-        end while !page_token.nil? && limit > 0
-
+          page_token = result.next_page_token
+          break if page_token.nil? || !limit.positive?
+        end
       end
-    rescue Exception => e
-      $logger.error e.message
-      $logger.error e.backtrace.inspect
+    rescue StandardError => e
+      @logger.error e.message
+      @logger.error e.backtrace.inspect
     end
 
-    $logger.info 'done'
+    @logger.info 'done'
   end
 end
 
