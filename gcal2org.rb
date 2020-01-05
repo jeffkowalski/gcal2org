@@ -51,14 +51,14 @@ def gcal_range_to_org_range(event)
   start_time = event.start.date_time
   unless start_time
     date_only_s = true
-    start_time = Time.parse(event.start.date)
+    start_time = event.start.date
   end
 
   date_only_e = false
   end_time = event.end.date_time
   unless end_time
     date_only_e = true
-    end_time = Time.parse(event.end.date)
+    end_time = event.end.date
   end
 
   if date_only_s && date_only_e
@@ -123,7 +123,7 @@ class GCal2Org < Thor
       service.client_options.application_name = APPLICATION_NAME
       service.authorization = authorize !options[:log]
       service
-    rescue Exception => e
+    rescue StandardError => e
       @logger.error e.message
       @logger.error e.backtrace.inspect
     end
