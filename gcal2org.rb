@@ -133,7 +133,6 @@ class GCal2Org < Thor
   def scan
     calendar = auth
     [{ file: 'jeff.org',     calendar: 'primary' },
-     { file: 'tempo.org',    calendar: 'jkowalski@tempoautomation.com' },
      { file: 'michelle.org', calendar: 'bowen.kowalski@gmail.com' }].each do |source|
       @logger.info "Fetching calendar #{source[:calendar]} into #{source[:file]}"
       File.open(File.join(ORGPATH, source[:file]), 'w') do |org|
