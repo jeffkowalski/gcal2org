@@ -38,7 +38,7 @@ def authorize(interactive)
   credentials = authorizer.get_credentials(user_id)
   if credentials.nil? && interactive
     url = authorizer.get_authorization_url(base_url: BASE_URI, scope: SCOPE)
-    code = ask("Open the following URL in the browser and enter the resulting code after authorization\n" + url)
+    code = ask("Open the following URL in the browser and enter the resulting code after authorization\n#{url}")
     credentials = authorizer.get_and_store_credentials_from_code(
       user_id: user_id, code: code, base_url: BASE_URI
     )
@@ -65,17 +65,16 @@ def gcal_range_to_org_range(event)
     if end_time.eql?(start_time + 86_400)
       start_time.strftime('<%Y-%m-%d %a>')
     else
-      start_time.strftime('<%Y-%m-%d %a>') + '--' + (end_time - 84_000).strftime('<%Y-%m-%d %a>')
+      "#{start_time.strftime('<%Y-%m-%d %a>')}--#{(end_time - 84_000).strftime('<%Y-%m-%d %a>')}"
     end
   else
-    start_time.strftime('<%Y-%m-%d %a %H:%M>') + '--' + end_time.strftime('<%Y-%m-%d %a %H:%M>')
+    "#{start_time.strftime('<%Y-%m-%d %a %H:%M>')}--#{end_time.strftime('<%Y-%m-%d %a %H:%M>')}"
   end
 end
 
 def format_email(person)
   [("\"#{person.display_name}\" " if person.display_name), "<#{person.email}>"].join('')
 end
-
 
 module Calendar
   class Time < ::Time
@@ -84,7 +83,6 @@ module Calendar
     end
   end
 end
-
 
 class GCal2Org < Thor
   no_commands do
@@ -103,7 +101,7 @@ class GCal2Org < Thor
     def setup_logger
       redirect_output if options[:log]
 
-      @logger = Logger.new STDOUT
+      @logger = Logger.new $stdout
       @logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
       @logger.info 'starting'
     end
@@ -148,13 +146,13 @@ class GCal2Org < Thor
                                         fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
 
           result.items.each do |event|
-            org.puts '* ' + (event.summary.nil? ? '(No title)' : event.summary)
+            org.puts "* #{event.summary.nil? ? '(No title)' : event.summary}"
             org.puts gcal_range_to_org_range(event)
             org.puts ':PROPERTIES:'
-            org.puts ':LOCATION: ' + event.location if event.location
-            org.puts ':ORGANIZER: ' + format_email(event.organizer) if event.organizer
+            org.puts ":LOCATION: #{event.location}" if event.location
+            org.puts ":ORGANIZER: #{format_email(event.organizer)}" if event.organizer
             event.attendees&.each do |attendee|
-              org.puts ':ATTENDEE: ' + format_email(attendee)
+              org.puts ":ATTENDEE: #{format_email(attendee)}"
             end
             org.puts ':END:'
             description = event.description
