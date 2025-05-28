@@ -12,7 +12,6 @@ require 'google/apis/calendar_v3'
 require 'fileutils'
 require 'logger'
 require 'thor'
-require 'resolv-replace'
 
 ORGPATH = File.join(Dir.home, 'Dropbox/workspace/org')
 LOGFILE = File.join(Dir.home, '.log', 'gcal2org.log')
