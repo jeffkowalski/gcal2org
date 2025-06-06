@@ -6,15 +6,14 @@
 #                      https://console.developers.google.com
 # Google API Ruby Client:  https://github.com/google/google-api-ruby-client
 
+require 'bundler/setup'
+Bundler.require(:default)
+
 require 'googleauth'
 require 'googleauth/stores/file_token_store'
 require 'google/apis/calendar_v3'
-require 'fileutils'
-require 'logger'
-require 'thor'
 
 ORGPATH = File.join(Dir.home, 'Dropbox/workspace/org')
-LOGFILE = File.join(Dir.home, '.log', 'gcal2org.log')
 
 BASE_URI = 'https://www.google.com'
 APPLICATION_NAME = 'gcal2org'
@@ -83,35 +82,9 @@ module Calendar
   end
 end
 
-class GCal2Org < Thor
-  no_commands do
-    def redirect_output
-      unless LOGFILE == 'STDOUT'
-        logfile = File.expand_path(LOGFILE)
-        FileUtils.mkdir_p(File.dirname(logfile), mode: 0o755)
-        FileUtils.touch logfile
-        File.chmod 0o644, logfile
-        $stdout.reopen logfile, 'a'
-      end
-      $stderr.reopen $stdout
-      $stdout.sync = $stderr.sync = true
-    end
-
-    def setup_logger
-      redirect_output if options[:log]
-
-      @logger = Logger.new $stdout
-      @logger.level = options[:verbose] ? Logger::DEBUG : Logger::INFO
-      @logger.info 'starting'
-    end
-  end
-
-  class_option :log,     type: :boolean, default: true, desc: "log output to #{LOGFILE}"
-  class_option :verbose, type: :boolean, aliases: '-v', desc: 'increase verbosity'
-
+class GCal2Org < ScannerBotBase
   desc 'auth', 'Authorize the application with google services'
   def auth
-    setup_logger
     #
     # initialize the API
     #
@@ -126,57 +99,53 @@ class GCal2Org < Thor
     end
   end
 
-  desc 'scan', 'Scan calendar'
-  def scan
-    calendar = auth
-    [{ file: 'jeff.org',     calendar: 'primary' },
-     { file: 'michelle.org', calendar: 'bowen.kowalski@gmail.com' }].each do |source|
-      @logger.info "Fetching calendar #{source[:calendar]} into #{source[:file]}"
-      File.open(File.join(ORGPATH, source[:file]), 'w') do |org|
-        limit = 30
-        page_token = nil
-        loop do
-          result = calendar.list_events(source[:calendar],
-                                        max_results: [100, limit].min,
-                                        single_events: true,
-                                        order_by: 'startTime',
-                                        time_min: Calendar::Time.new.start_of_day.iso8601,
-                                        page_token: page_token,
-                                        fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
+  no_commands do
+    def main
+      calendar = auth
+      [{ file: 'jeff.org',     calendar: 'primary' },
+       { file: 'michelle.org', calendar: 'bowen.kowalski@gmail.com' }].each do |source|
+        @logger.info "Fetching calendar #{source[:calendar]} into #{source[:file]}"
+        File.open(File.join(ORGPATH, source[:file]), 'w') do |org|
+          limit = 30
+          page_token = nil
+          loop do
+            result = calendar.list_events(source[:calendar],
+                                          max_results: [100, limit].min,
+                                          single_events: true,
+                                          order_by: 'startTime',
+                                          time_min: Calendar::Time.new.start_of_day.iso8601,
+                                          page_token: page_token,
+                                          fields: 'items(id,summary,location,organizer,attendees,description,start,end),next_page_token')
 
-          result.items.each do |event|
-            org.puts "* #{event.summary.nil? ? '(No title)' : event.summary}"
-            org.puts gcal_range_to_org_range(event)
-            org.puts ':PROPERTIES:'
-            org.puts ":LOCATION: #{event.location}" if event.location
-            org.puts ":ORGANIZER: #{format_email(event.organizer)}" if event.organizer
-            event.attendees&.each do |attendee|
-              org.puts ":ATTENDEE: #{format_email(attendee)}"
+            result.items.each do |event|
+              org.puts "* #{event.summary.nil? ? '(No title)' : event.summary}"
+              org.puts gcal_range_to_org_range(event)
+              org.puts ':PROPERTIES:'
+              org.puts ":LOCATION: #{event.location}" if event.location
+              org.puts ":ORGANIZER: #{format_email(event.organizer)}" if event.organizer
+              event.attendees&.each do |attendee|
+                org.puts ":ATTENDEE: #{format_email(attendee)}"
+              end
+              org.puts ':END:'
+              description = event.description
+              next unless description
+
+              description = description
+                            .gsub(/^\*/, '-*')
+                            .gsub(/_/,   ' ')
+                            .gsub(/\r$/, '')
+                            .gsub(/ +$/, '')
+                            .gsub(/^\n/, '')
+              org.puts description
             end
-            org.puts ':END:'
-            description = event.description
-            next unless description
 
-            description = description
-                          .gsub(/^\*/, '-*')
-                          .gsub(/_/,   ' ')
-                          .gsub(/\r$/, '')
-                          .gsub(/ +$/, '')
-                          .gsub(/^\n/, '')
-            org.puts description
+            limit -= result.items.length
+            page_token = result.next_page_token
+            break if page_token.nil? || !limit.positive?
           end
-
-          limit -= result.items.length
-          page_token = result.next_page_token
-          break if page_token.nil? || !limit.positive?
         end
       end
-    rescue StandardError => e
-      @logger.error e.message
-      @logger.error e.backtrace.inspect
     end
-
-    @logger.info 'done'
   end
 end
 
