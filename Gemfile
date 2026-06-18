@@ -6,6 +6,7 @@ source 'https://rubygems.org'
 
 gem 'google-api-client'
 gem 'googleauth'
+gem 'multi_json'
 gem 'pstore' # Add this to silence Ruby 3.5+ warning
 gem 'thor'
 
